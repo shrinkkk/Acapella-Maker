@@ -5,6 +5,11 @@ import java.io.File
 /** One acapella: a layout plus one video file per cell. Files live in app-private storage. */
 class Project(val layout: GridLayout, val dir: File) {
 
+    // Screen settings kept on the project so they survive visiting another screen (e.g. calibration).
+    var bpm: Int = 100
+    var beatsPerBar: Int = 4
+    var selectedCell: Int = 0
+
     /** Video (with the camera's own audio track). */
     fun takeFile(index: Int): File = File(dir, "take_${index + 1}.mp4")
 

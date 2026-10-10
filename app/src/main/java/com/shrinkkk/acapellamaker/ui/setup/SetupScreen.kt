@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -41,7 +42,7 @@ import com.shrinkkk.acapellamaker.ui.grid.GridCanvas
 
 /** Pick how many takes, then one of the standard layouts for that count. */
 @Composable
-fun SetupScreen(onStart: (GridLayout) -> Unit) {
+fun SetupScreen(onStart: (GridLayout) -> Unit, onOpenCalibration: () -> Unit) {
     var takeCount by rememberSaveable { mutableIntStateOf(4) }
     val options = remember(takeCount) { GridLayouts.optionsFor(takeCount) }
     var selectedLayout by rememberSaveable(takeCount) { mutableIntStateOf(0) }
@@ -85,6 +86,13 @@ fun SetupScreen(onStart: (GridLayout) -> Unit) {
             }
 
             Spacer(Modifier.weight(1f))
+            OutlinedButton(
+                onClick = onOpenCalibration,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+            ) {
+                Text("Sync calibration")
+            }
+            Spacer(Modifier.height(12.dp))
             Button(
                 onClick = { onStart(options[selectedLayout.coerceIn(options.indices)]) },
                 modifier = Modifier.fillMaxWidth().height(52.dp),

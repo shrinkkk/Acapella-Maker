@@ -20,6 +20,10 @@ data class TakeInfo(
     val bpm: Int,
     val beatsPerBar: Int,
     val metronomeOn: Boolean,
+    /** Output route during the take (speaker, usb, ...). */
+    val route: String,
+    /** Measured round trip for that route at record time; null if it wasn't calibrated. */
+    val calibratedRoundTripMs: Double?,
 ) {
     fun writeTo(file: File) {
         val json = JSONObject()
@@ -33,11 +37,20 @@ data class TakeInfo(
             .put("bpm", bpm)
             .put("beatsPerBar", beatsPerBar)
             .put("metronomeOn", metronomeOn)
+            .put("route", route)
+            .put("calibratedRoundTripMs", calibratedRoundTripMs ?: JSONObject.NULL)
         file.writeText(json.toString(2))
     }
 
     companion object {
-        fun from(info: EngineRecordingInfo, bpm: Int, beatsPerBar: Int, metronomeOn: Boolean) = TakeInfo(
+        fun from(
+            info: EngineRecordingInfo,
+            bpm: Int,
+            beatsPerBar: Int,
+            metronomeOn: Boolean,
+            route: String,
+            calibratedRoundTripMs: Double?,
+        ) = TakeInfo(
             sampleRate = info.sampleRate,
             framesCaptured = info.framesCaptured,
             estimatedRoundTripMs = info.estimatedRoundTripMs,
@@ -47,6 +60,8 @@ data class TakeInfo(
             bpm = bpm,
             beatsPerBar = beatsPerBar,
             metronomeOn = metronomeOn,
+            route = route,
+            calibratedRoundTripMs = calibratedRoundTripMs,
         )
     }
 }

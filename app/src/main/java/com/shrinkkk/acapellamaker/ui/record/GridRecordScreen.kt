@@ -55,6 +55,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import com.shrinkkk.acapellamaker.audio.AudioEngine
 import com.shrinkkk.acapellamaker.audio.EngineRecordingInfo
+import com.shrinkkk.acapellamaker.calibration.AudioRoute
+import com.shrinkkk.acapellamaker.calibration.CalibrationStore
 import com.shrinkkk.acapellamaker.model.TakeInfo
 import com.shrinkkk.acapellamaker.camera.TakeRecorder
 import com.shrinkkk.acapellamaker.model.GridLayouts
@@ -76,12 +78,13 @@ fun GridRecordScreen(
     lifecycleOwner: LifecycleOwner,
     project: Project,
     onExit: () -> Unit,
+    onOpenCalibration: () -> Unit,
 ) {
     val context = LocalContext.current
     val recorder = remember { TakeRecorder(context) }
     val takeCount = project.layout.takeCount
 
-    var selected by rememberSaveable { mutableIntStateOf(0) }
+    var selected by rememberSaveable { mutableIntStateOf(project.selectedCell) }
     var isRecording by remember { mutableStateOf(false) }
     var elapsedMs by remember { mutableLongStateOf(0L) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -91,6 +94,20 @@ fun GridRecordScreen(
     var engineInfo by remember { mutableStateOf<EngineRecordingInfo?>(null) }
     // One-line report about the last take's engine audio (helps check the engine is capturing).
     var lastTakeReport by remember { mutableStateOf<String?>(null) }
+
+    // --- Calibration for the current output (speaker / earphones) ---
+    val calibrationStore = remember { CalibrationStore(context) }
+    var route by remember { mutableStateOf(AudioRoute.current(context)) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            if (!isRecording) route = AudioRoute.current(context)
+            delay(1000)
+        }
+    }
+    val calibratedMs = calibrationStore.roundTripMs(route)
+    // Route and delay in effect for the take being recorded.
+    var takeRoute by remember { mutableStateOf(route) }
+    var takeCalibratedMs by remember { mutableStateOf<Double?>(null) }
     // Fresh group each time preview starts, sized to the takes that exist right now.
     val previewGroup = remember(previewing) {
         if (previewing) GroupPlayback((0 until takeCount).count { project.hasTake(it) }) else null
@@ -110,8 +127,13 @@ fun GridRecordScreen(
 
     // --- Metronome ---
     var metronomeOn by rememberSaveable { mutableStateOf(false) }
-    var bpm by rememberSaveable { mutableIntStateOf(100) }
-    var beatsPerBar by rememberSaveable { mutableIntStateOf(4) }
+    var bpm by rememberSaveable { mutableIntStateOf(project.bpm) }
+    var beatsPerBar by rememberSaveable { mutableIntStateOf(project.beatsPerBar) }
+    LaunchedEffect(bpm, beatsPerBar, selected) {
+        project.bpm = bpm
+        project.beatsPerBar = beatsPerBar
+        project.selectedCell = selected
+    }
     var currentBeat by remember { mutableIntStateOf(-1) }
 
     LaunchedEffect(bpm) { AudioEngine.setBpm(bpm) }
@@ -175,6 +197,7 @@ fun GridRecordScreen(
                 error != null -> error!!
                 previewing -> "Rough preview - takes aren't synced to each other yet"
                 lastTakeReport != null && !isRecording -> lastTakeReport!!
+                calibratedMs == null -> "Not calibrated for ${route.label} - tap Calibrate"
                 isRecording -> "● Recording take ${selected + 1}   ${formatElapsed(elapsedMs)}"
                 project.hasTake(selected) && takeVersions[selected] >= 0 ->
                     "Take ${selected + 1} of $takeCount - recording again replaces it"
@@ -285,6 +308,8 @@ fun GridRecordScreen(
                     lastTakeReport = null
                     engineInfo = null
                     val cell = selected
+                    takeRoute = route
+                    takeCalibratedMs = calibratedMs
                     val wavTemp = File(project.dir, "take_${cell + 1}.recording.wav")
 
                     // The engine provides the shared clock, so it runs while recording even with
@@ -311,9 +336,12 @@ fun GridRecordScreen(
                             .onSuccess {
                                 project.takeAudioFile(cell).delete()
                                 wavTemp.renameTo(project.takeAudioFile(cell))
-                                TakeInfo.from(info, bpm, beatsPerBar, metronomeOn)
-                                    .writeTo(project.takeInfoFile(cell))
-                                lastTakeReport = describe(cell, info)
+                                TakeInfo.from(
+                                    info, bpm, beatsPerBar, metronomeOn,
+                                    route = takeRoute.key,
+                                    calibratedRoundTripMs = takeCalibratedMs,
+                                ).writeTo(project.takeInfoFile(cell))
+                                lastTakeReport = describe(cell, info, takeRoute, takeCalibratedMs)
 
                                 takeVersions[cell] = takeVersions[cell] + 1
                                 // Move on to the next empty cell, if there is one.
@@ -328,8 +356,11 @@ fun GridRecordScreen(
                 }
             },
         )
-            // Keeps the record button centred.
-            Box(Modifier.weight(1f))
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                OutlinedButton(onClick = onOpenCalibration, enabled = !isRecording && !previewing) {
+                    Text("Calibrate", color = Color.White)
+                }
+            }
         }
     }
 
@@ -407,16 +438,16 @@ private fun RecordButton(
     }
 }
 
-/** e.g. "Take 2 saved · engine audio 12.4 s · peak -8 dB · est. latency 41 ms" */
-private fun describe(cell: Int, info: EngineRecordingInfo): String {
-    val latency = info.estimatedRoundTripMs?.let { "%.0f ms".format(it) } ?: "unknown"
+/** e.g. "Take 2 saved · engine audio 12.4 s · peak -8 dB · delay 142 ms (USB-C earphones / adapter)" */
+private fun describe(cell: Int, info: EngineRecordingInfo, route: AudioRoute, calibratedMs: Double?): String {
+    val latency = calibratedMs?.let { "%.0f ms (%s)".format(it, route.label) } ?: "not calibrated (${route.label})"
     val warning = when {
         info.framesCaptured == 0L -> " · NO ENGINE AUDIO"
         info.peak < 0.001f -> " · engine audio silent?"
         info.overflowFrames > 0 -> " · ${info.overflowFrames} frames dropped"
         else -> ""
     }
-    return "Take ${cell + 1} saved · engine audio %.1f s · peak %.0f dB · est. latency %s%s"
+    return "Take ${cell + 1} saved · engine audio %.1f s · peak %.0f dB · delay %s%s"
         .format(info.seconds, info.peakDb, latency, warning)
 }
 

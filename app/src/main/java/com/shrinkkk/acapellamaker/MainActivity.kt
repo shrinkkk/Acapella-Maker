@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import com.shrinkkk.acapellamaker.model.Project
+import com.shrinkkk.acapellamaker.ui.calibration.CalibrationScreen
 import com.shrinkkk.acapellamaker.ui.permissions.PermissionScreen
 import com.shrinkkk.acapellamaker.ui.record.GridRecordScreen
 import com.shrinkkk.acapellamaker.ui.setup.SetupScreen
@@ -32,6 +33,9 @@ class MainActivity : ComponentActivity() {
 
     /** The acapella being recorded; null means we're on the setup screen. */
     private var project by mutableStateOf<Project?>(null)
+
+    /** Calibration is shown on top of whatever screen opened it (the project is kept). */
+    private var calibrating by mutableStateOf(false)
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -55,7 +59,10 @@ class MainActivity : ComponentActivity() {
                         onOpenSettings = ::openAppSettings,
                     )
 
+                    calibrating -> CalibrationScreen(onBack = { calibrating = false })
+
                     current == null -> SetupScreen(
+                        onOpenCalibration = { calibrating = true },
                         // Takes are stored privately in the app (not in the gallery) until export exists.
                         onStart = { layout -> project = Project.createFresh(filesDir, layout) },
                     )
@@ -64,6 +71,7 @@ class MainActivity : ComponentActivity() {
                         lifecycleOwner = this,
                         project = current,
                         onExit = { project = null },
+                        onOpenCalibration = { calibrating = true },
                     )
                 }
             }
