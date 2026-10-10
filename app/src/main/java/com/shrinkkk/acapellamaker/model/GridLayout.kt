@@ -23,7 +23,8 @@ object GridLayouts {
 
         val side = ceil(sqrt(takes.toDouble())).toInt()
         val candidates = buildList {
-            if (takes <= 6) add(grid("Stacked", takes, rows = takes, cols = 1))
+            // Stacked only up to 5: beyond that the strips get too thin.
+            if (takes <= 5) add(grid("Stacked", takes, rows = takes, cols = 1))
             // Side by side only for 2: with 3+ the columns get too thin to use.
             if (takes == 2) add(grid("Side by side", takes, rows = 1, cols = 2))
 
@@ -42,6 +43,7 @@ object GridLayouts {
                     add(filledRows("3 + 3 + 1 wide", listOf(3, 3, 1)))
                     add(filledRows("3 + 2 + 2", listOf(3, 2, 2)))
                 }
+                8 -> add(filledRows("3 + 3 + 2 wide", listOf(3, 3, 2)))
             }
         }
         return candidates.distinctBy { it.cells }
