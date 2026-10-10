@@ -1,13 +1,24 @@
+# Android Studio / IntelliJ
 *.iml
-.gradle/
-/local.properties
 .idea/
-.DS_Store
+.kotlin/
+
+# Gradle
+.gradle/
 /build/
 **/build/
 /captures/
+local.properties
+
+# Native (Oboe / CMake)
 .externalNativeBuild/
 .cxx/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Outputs / signing
 *.apk
 *.aab
 *.keystore
