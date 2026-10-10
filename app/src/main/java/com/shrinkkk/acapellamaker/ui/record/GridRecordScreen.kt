@@ -9,6 +9,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -38,6 +40,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -79,6 +82,11 @@ fun GridRecordScreen(
     var elapsedMs by remember { mutableLongStateOf(0L) }
     var error by remember { mutableStateOf<String?>(null) }
     var confirmExit by remember { mutableStateOf(false) }
+    var previewing by remember { mutableStateOf(false) }
+    // Fresh group each time preview starts, sized to the takes that exist right now.
+    val previewGroup = remember(previewing) {
+        if (previewing) GroupPlayback((0 until takeCount).count { project.hasTake(it) }) else null
+    }
     // Bumped when a cell's take changes, so its thumbnail reloads.
     val takeVersions = remember { mutableStateListOf<Int>().apply { repeat(takeCount) { add(0) } } }
 
@@ -139,7 +147,11 @@ fun GridRecordScreen(
     }
 
     BackHandler(enabled = !isRecording) {
-        if (project.hasAnyTake()) confirmExit = true else onExit()
+        when {
+            previewing -> previewing = false
+            project.hasAnyTake() -> confirmExit = true
+            else -> onExit()
+        }
     }
 
     Column(
@@ -153,6 +165,7 @@ fun GridRecordScreen(
         StatusLine(
             text = when {
                 error != null -> error!!
+                previewing -> "Rough preview - takes aren't synced to each other yet"
                 isRecording -> "● Recording take ${selected + 1}   ${formatElapsed(elapsedMs)}"
                 project.hasTake(selected) && takeVersions[selected] >= 0 ->
                     "Take ${selected + 1} of $takeCount - recording again replaces it"
@@ -174,12 +187,15 @@ fun GridRecordScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(Color.Black)
-                        .clickable(enabled = !isRecording && !isSelected) {
+                        .clickable(enabled = !isRecording && !previewing && !isSelected) {
                             selected = index
                             error = null
                         },
                 ) {
                     when {
+                        previewing -> if (project.hasTake(index)) {
+                            CroppedTakeVideo(file = project.takeFile(index), group = previewGroup!!)
+                        }
                         isSelected -> CameraPreview(
                             lifecycleOwner = lifecycleOwner,
                             extraUseCase = recorder.videoCapture,
@@ -205,8 +221,9 @@ fun GridRecordScreen(
                     Modifier
                         .matchParentSize()
                         .border(
-                            width = if (isSelected) 3.dp else 1.dp,
+                            width = if (isSelected && !previewing) 3.dp else 1.dp,
                             color = when {
+                                previewing -> Color.DarkGray
                                 isSelected && isRecording -> Color.Red
                                 isSelected -> Color.White
                                 else -> Color.DarkGray
@@ -218,7 +235,7 @@ fun GridRecordScreen(
         }
 
         MetronomeBar(
-            enabled = !isRecording,
+            enabled = !isRecording && !previewing,
             on = metronomeOn,
             bpm = bpm,
             beatsPerBar = beatsPerBar,
@@ -229,9 +246,24 @@ fun GridRecordScreen(
             modifier = Modifier.padding(top = 12.dp),
         )
 
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                OutlinedButton(
+                    onClick = {
+                        if (!previewing) metronomeOn = false
+                        previewing = !previewing
+                    },
+                    enabled = !isRecording && (previewing || project.hasAnyTake()) && takeVersions.sum() >= 0,
+                ) {
+                    Text(if (previewing) "Stop" else "Preview", color = Color.White)
+                }
+            }
         RecordButton(
             isRecording = isRecording,
-            modifier = Modifier.padding(vertical = 16.dp),
+            enabled = !previewing,
             onClick = {
                 if (isRecording) {
                     recorder.stop()
@@ -256,6 +288,9 @@ fun GridRecordScreen(
                 }
             },
         )
+            // Keeps the record button centred.
+            Box(Modifier.weight(1f))
+        }
     }
 
     if (confirmExit) {
@@ -306,13 +341,19 @@ private fun TakeThumbnail(file: File, version: Int) {
 }
 
 @Composable
-private fun RecordButton(isRecording: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun RecordButton(
+    isRecording: Boolean,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
     Box(
         modifier = modifier
             .size(76.dp)
+            .alpha(if (enabled) 1f else 0.35f)
             .border(4.dp, Color.White, CircleShape)
             .clip(CircleShape)
-            .clickable(onClick = onClick),
+            .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Box(
