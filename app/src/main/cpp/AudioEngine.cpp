@@ -77,6 +77,7 @@ bool AudioEngine::openStream() {
     }
 
     mChannelCount = mStream->getChannelCount();
+    mOutputDeviceId.store(mStream->getDeviceId());
     mSampleRate.store(mStream->getSampleRate());
     buildClicks(mStream->getSampleRate());
 
@@ -134,6 +135,7 @@ bool AudioEngine::openInputStream() {
         mInput.reset();
         return false;
     }
+    mInputDeviceId.store(mInput->getDeviceId());
     LOGI("Input stream: %d Hz, %d ch, sharing=%s, perf=%s",
          mInput->getSampleRate(), mInput->getChannelCount(),
          oboe::convertToText(mInput->getSharingMode()),

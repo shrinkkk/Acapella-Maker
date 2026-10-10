@@ -50,8 +50,16 @@ object AudioEngine {
     val framesRendered: Long get() = nativeFramesRendered()
     val sampleRate: Int get() = nativeSampleRate()
 
+    /** AudioDeviceInfo id of the output in use (0 if unknown). */
+    val outputDeviceId: Int get() = nativeOutputDeviceId()
+
+    /** AudioDeviceInfo id of the mic used by the last/current recording (0 if unknown). */
+    val inputDeviceId: Int get() = nativeInputDeviceId()
+
     private external fun nativeStartRecording(path: String): Boolean
     private external fun nativeStopRecording(): DoubleArray
+    private external fun nativeOutputDeviceId(): Int
+    private external fun nativeInputDeviceId(): Int
     private external fun nativeStart(): Boolean
     private external fun nativeStop()
     private external fun nativeIsRunning(): Boolean

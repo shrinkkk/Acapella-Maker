@@ -17,6 +17,8 @@ data class CalibrationResult(
     val spreadMs: Double,
     val clicksHeard: Int,
     val clicksPlayed: Int,
+    val outputDeviceId: Int = 0,
+    val inputDeviceId: Int = 0,
 )
 
 /**
@@ -50,7 +52,10 @@ object LatencyCalibrator {
             if (info.framesCaptured == 0L) {
                 return Result.failure(IllegalStateException("The microphone recorded nothing"))
             }
+            val outId = AudioEngine.outputDeviceId
+            val inId = AudioEngine.inputDeviceId
             return withContext(Dispatchers.Default) { analyse(readWavMono16(wav), info.sampleRate) }
+                .map { it.copy(outputDeviceId = outId, inputDeviceId = inId) }
         } finally {
             AudioEngine.setMetronomeEnabled(false)
             AudioEngine.setMetronomeVolume(0.8f)

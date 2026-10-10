@@ -56,6 +56,9 @@ public:
     int64_t beatsStarted() const { return mBeatsStarted.load(); }
     int32_t sampleRate() const { return mSampleRate.load(); }
     bool isRunning() const { return mRunning.load(); }
+    /** Android AudioDeviceInfo ids of the devices actually in use (0 = unknown). */
+    int32_t outputDeviceId() const { return mOutputDeviceId.load(); }
+    int32_t inputDeviceId() const { return mInputDeviceId.load(); }
     bool isRecording() const { return mRecording.load() || mRecordRequested.load(); }
 
     // Oboe callbacks
@@ -78,6 +81,8 @@ private:
 
     std::atomic<bool> mRunning{false};
     std::atomic<int32_t> mSampleRate{48000};
+    std::atomic<int32_t> mOutputDeviceId{0};
+    std::atomic<int32_t> mInputDeviceId{0};
     std::atomic<int64_t> mFramesRendered{0};
 
     // Metronome settings (written by UI thread, read by audio thread)

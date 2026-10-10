@@ -79,6 +79,14 @@ JNIEXPORT jdoubleArray JNICALL JNI_FN(nativeStopRecording)(JNIEnv *env, jobject)
     return result;
 }
 
+JNIEXPORT jint JNICALL JNI_FN(nativeOutputDeviceId)(JNIEnv *, jobject) {
+    return engine().outputDeviceId();
+}
+
+JNIEXPORT jint JNICALL JNI_FN(nativeInputDeviceId)(JNIEnv *, jobject) {
+    return engine().inputDeviceId();
+}
+
 JNIEXPORT jboolean JNICALL JNI_FN(nativeIsRunning)(JNIEnv *, jobject) {
     return engine().isRunning() ? JNI_TRUE : JNI_FALSE;
 }

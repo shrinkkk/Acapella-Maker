@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.shrinkkk.acapellamaker.audio.describeAudioDevice
 import com.shrinkkk.acapellamaker.calibration.AudioRoute
 import com.shrinkkk.acapellamaker.calibration.CalibrationStore
 import com.shrinkkk.acapellamaker.calibration.LatencyCalibrator
@@ -124,8 +125,12 @@ fun CalibrationScreen(onBack: () -> Unit) {
                                 store.save(testedRoute, it.roundTripMs)
                                 savedVersion++
                                 messageIsError = false
-                                message = "Measured %.0f ms for %s (heard %d/%d clicks, within %.1f ms). Saved."
-                                    .format(it.roundTripMs, testedRoute.label, it.clicksHeard, it.clicksPlayed, it.spreadMs)
+                                message = ("Measured %.0f ms for %s (heard %d/%d clicks, within %.1f ms). Saved.\n" +
+                                    "Played on: %s\nRecorded from: %s").format(
+                                    it.roundTripMs, testedRoute.label, it.clicksHeard, it.clicksPlayed, it.spreadMs,
+                                    describeAudioDevice(context, it.outputDeviceId),
+                                    describeAudioDevice(context, it.inputDeviceId),
+                                )
                             }
                             .onFailure {
                                 messageIsError = true
