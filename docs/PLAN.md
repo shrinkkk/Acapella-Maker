@@ -30,8 +30,9 @@ Export
 
 ## Recording UX (agreed direction)
 
-- **New project:** choose the number of takes up front. That fixes the grid.
-- **Grid layouts:** 1 = full screen, 2 = 2 stacked, 3 = 3 stacked, 4 = 2x2, larger counts TBD.
+- **New project:** choose the number of takes (1-9), then pick one of a few standard layouts for that count,
+  shown as phone-shaped thumbnails with grey cells (stacked, side by side, grids; a partly filled last row is centred).
+- **Canvas:** 9:16 portrait for now.
 - **The record screen is the grid itself**, laid out exactly as the final video will be:
   - Tap a cell to select it (highlighted). Only the selected cell shows the live camera preview.
   - Record records into the selected cell.
@@ -41,8 +42,7 @@ Export
   so what you see in a cell is what ends up in the final video.
 
 Open questions (to decide later):
-- Final video aspect ratio (9:16 portrait vs other)
-- Layouts for 5+ takes
+- Other canvas shapes (square, landscape)?
 - Per-cell controls beyond mute (volume, nudge, re-record confirm)
 
 ## Milestones (each one gets its own commit)

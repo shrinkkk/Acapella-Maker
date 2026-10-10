@@ -40,13 +40,19 @@ class TakeRecorder(private val context: Context) {
 
     private var active: Recording? = null
 
+    /**
+     * Records to a temporary file and only replaces [file] once recording succeeds,
+     * so a failed re-record never destroys an existing take.
+     */
     fun start(file: File, onFinished: (Result<File>) -> Unit) {
         if (active != null) return
         file.parentFile?.mkdirs()
+        val temp = File(file.parentFile, file.nameWithoutExtension + ".recording.mp4")
+        temp.delete()
 
         var pending = videoCapture.output.prepareRecording(
             context,
-            FileOutputOptions.Builder(file).build(),
+            FileOutputOptions.Builder(temp).build(),
         )
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
             == PackageManager.PERMISSION_GRANTED
@@ -58,13 +64,19 @@ class TakeRecorder(private val context: Context) {
             if (event is VideoRecordEvent.Finalize) {
                 active = null
                 if (event.hasError()) {
+                    temp.delete()
                     onFinished(
                         Result.failure(
                             RuntimeException("Recording failed (error ${event.error})", event.cause)
                         )
                     )
                 } else {
-                    onFinished(Result.success(file))
+                    file.delete()
+                    if (temp.renameTo(file)) {
+                        onFinished(Result.success(file))
+                    } else {
+                        onFinished(Result.failure(RuntimeException("Could not save take")))
+                    }
                 }
             }
         }
