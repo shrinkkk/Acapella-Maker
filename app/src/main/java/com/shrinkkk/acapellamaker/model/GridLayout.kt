@@ -24,12 +24,25 @@ object GridLayouts {
         val side = ceil(sqrt(takes.toDouble())).toInt()
         val candidates = buildList {
             if (takes <= 6) add(grid("Stacked", takes, rows = takes, cols = 1))
-            if (takes <= 4) add(grid("Side by side", takes, rows = 1, cols = takes))
-            // "Wide" grid: more columns than rows when it can't be square, and the opposite.
+            // Side by side only for 2: with 3+ the columns get too thin to use.
+            if (takes == 2) add(grid("Side by side", takes, rows = 1, cols = 2))
+
+            // Square-ish grids. A partly filled last row is centred.
             val wideRows = ceil(takes / side.toDouble()).toInt()
-            add(grid("Grid $wideRows×$side", takes, rows = wideRows, cols = side))
+            // Skipped for 5: three across with two centred below wasn't wanted.
+            if (takes != 5) add(grid("Grid $wideRows×$side", takes, rows = wideRows, cols = side))
             val tallCols = ceil(takes / side.toDouble()).toInt()
             add(grid("Grid $side×$tallCols", takes, rows = side, cols = tallCols))
+
+            // Rows that stretch to fill the full width.
+            when (takes) {
+                3 -> add(filledRows("2 + 1 wide", listOf(2, 1)))
+                5 -> add(filledRows("2 + 2 + 1 wide", listOf(2, 2, 1)))
+                7 -> {
+                    add(filledRows("3 + 3 + 1 wide", listOf(3, 3, 1)))
+                    add(filledRows("3 + 2 + 2", listOf(3, 2, 2)))
+                }
+            }
         }
         return candidates.distinctBy { it.cells }
     }
@@ -44,6 +57,16 @@ object GridLayouts {
             val cellsInRow = if (row == rows - 1) takes - row * cols else cols
             val rowOffset = (cols - cellsInRow) * w / 2f
             CellRect(rowOffset + col * w, row * h, w, h)
+        }
+        return GridLayout(name, cells)
+    }
+
+    /** Equal-height rows; each row's cells split the full width evenly (e.g. [2, 1] = two on top, one wide below). */
+    private fun filledRows(name: String, cellsPerRow: List<Int>): GridLayout {
+        val h = 1f / cellsPerRow.size
+        val cells = cellsPerRow.flatMapIndexed { row, count ->
+            val w = 1f / count
+            (0 until count).map { col -> CellRect(col * w, row * h, w, h) }
         }
         return GridLayout(name, cells)
     }
