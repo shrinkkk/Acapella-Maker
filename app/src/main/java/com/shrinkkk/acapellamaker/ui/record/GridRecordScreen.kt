@@ -7,6 +7,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,6 +37,8 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -69,6 +73,10 @@ import com.shrinkkk.acapellamaker.ui.grid.GridCanvas
 import com.shrinkkk.acapellamaker.ui.metronome.MetronomeBar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import com.shrinkkk.acapellamaker.audio.readEngineWav
+import com.shrinkkk.acapellamaker.sync.TakeAligner
+import kotlin.math.roundToInt
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -93,6 +101,11 @@ fun GridRecordScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var confirmExit by remember { mutableStateOf(false) }
     var previewing by remember { mutableStateOf(false) }
+    // True between pressing record and the recording actually starting (loading backing takes).
+    var preparing by remember { mutableStateOf(false) }
+    // Which take's volume slider is open (preview only).
+    var volumeDialogFor by remember { mutableStateOf<Int?>(null) }
+    val scope = rememberCoroutineScope()
     // Engine-side result of the take being recorded, captured when Stop is pressed.
     var engineInfo by remember { mutableStateOf<EngineRecordingInfo?>(null) }
     // One-line report about the last take's engine audio (helps check the engine is capturing).
@@ -180,6 +193,23 @@ fun GridRecordScreen(
         }
     }
 
+    // Keep the engine's per-take volumes in step with the mute buttons and volume sliders.
+    LaunchedEffect(project) {
+        snapshotFlow { (0 until takeCount).map { project.gainFor(it) } }
+            .collect { gains -> gains.forEachIndexed { i, g -> AudioEngine.setTakeGain(i, g) } }
+    }
+
+    // While recording, the other takes' videos follow the backing audio (same clock as the take).
+    LaunchedEffect(isRecording) {
+        if (!isRecording) return@LaunchedEffect
+        val outputDelayMs = (calibratedMs ?: 80.0) / 2
+        val sampleRate = AudioEngine.sampleRate.toDouble()
+        while (true) {
+            withFrameNanos { }
+            videoSync.sync(AudioEngine.playbackFrame * 1000.0 / sampleRate - outputDelayMs)
+        }
+    }
+
     // --- Synced preview: engine plays the takes' audio, videos follow it ---
     LaunchedEffect(previewing) {
         if (!previewing) return@LaunchedEffect
@@ -234,9 +264,10 @@ fun GridRecordScreen(
             text = when {
                 error != null -> error!!
                 previewing -> placedTakes?.let { describePreview(it) } ?: "Lining up takes…"
-                lastTakeReport != null && !isRecording -> lastTakeReport!!
-                calibratedMs == null -> "Not calibrated for ${route.label} - tap Calibrate"
                 isRecording -> "● Recording take ${selected + 1}   ${formatElapsed(elapsedMs)}"
+                preparing -> "Getting ready…"
+                lastTakeReport != null -> lastTakeReport!!
+                calibratedMs == null -> "Not calibrated for ${route.label} - tap Calibrate"
                 project.hasTake(selected) && takeVersions[selected] >= 0 ->
                     "Take ${selected + 1} of $takeCount - recording again replaces it"
                 else -> "Take ${selected + 1} of $takeCount - tap a box to choose"
@@ -263,8 +294,9 @@ fun GridRecordScreen(
                             lastTakeReport = null
                         },
                 ) {
+                    val showVideo = previewing || (isRecording && !isSelected)
                     when {
-                        previewing -> if (project.hasTake(index)) {
+                        showVideo -> if (project.hasTake(index)) {
                             CroppedTakeVideo(
                                 file = project.takeFile(index),
                                 onReady = { videoSync.register(index, it) },
@@ -279,6 +311,24 @@ fun GridRecordScreen(
                             file = project.takeFile(index),
                             version = takeVersions[index],
                         )
+                    }
+                    // Mute (record + preview) and volume (preview) controls on recorded takes.
+                    // Not on the selected cell while recording/arming: that one is the live camera.
+                    val hasTake = project.hasTake(index) && takeVersions[index] >= 0
+                    if (hasTake && (previewing || !isSelected)) {
+                        Row(
+                            modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            if (previewing) {
+                                CellPill(text = "🎚 ${(project.volume[index] * 100).roundToInt()}%") {
+                                    volumeDialogFor = index
+                                }
+                            }
+                            CellPill(text = if (project.muted[index]) "🔇" else "🔊") {
+                                project.muted[index] = !project.muted[index]
+                            }
+                        }
                     }
                     // Cell numbers are on-screen only (hidden in preview); export renders just the videos.
                     if (!previewing) Text(
@@ -339,13 +389,14 @@ fun GridRecordScreen(
             }
         RecordButton(
             isRecording = isRecording,
-            enabled = !previewing,
+            enabled = !previewing && !preparing,
             onClick = onClick@{
                 if (isRecording) {
                     // Stop the engine side first so its audio ends with the button press.
                     engineInfo = AudioEngine.stopRecording()
                     recorder.stop()
                 } else {
+                    if (preparing) return@onClick
                     error = null
                     lastTakeReport = null
                     engineInfo = null
@@ -353,48 +404,73 @@ fun GridRecordScreen(
                     takeRoute = route
                     takeCalibratedMs = calibratedMs
                     val wavTemp = File(project.dir, "take_${cell + 1}.recording.wav")
+                    preparing = true
 
-                    // The engine provides the shared clock, so it runs while recording even with
-                    // the click off (it then just plays silence).
-                    if (!AudioEngine.isRunning && !AudioEngine.start()) {
-                        error = "Couldn't start the audio engine"
-                        return@onClick
-                    }
-                    // Starts the mic capture and restarts the beat in the same audio callback.
-                    if (!AudioEngine.startRecording(wavTemp)) {
-                        error = "Couldn't open the mic in the audio engine"
-                        if (!metronomeOn) AudioEngine.stop()
-                        return@onClick
-                    }
-
-                    isRecording = true
-                    recorder.start(project.takeFile(cell)) { result ->
-                        isRecording = false
-                        // Normally already stopped by the button; this covers camera-side failures.
-                        val info = engineInfo ?: AudioEngine.stopRecording()
-                        if (!metronomeOn) AudioEngine.stop()
-
-                        result
-                            .onSuccess {
-                                project.takeAlignFile(cell).delete()
-                                project.takeAudioFile(cell).delete()
-                                wavTemp.renameTo(project.takeAudioFile(cell))
-                                TakeInfo.from(
-                                    info, bpm, beatsPerBar, metronomeOn,
-                                    route = takeRoute.key,
-                                    calibratedRoundTripMs = takeCalibratedMs,
-                                ).writeTo(project.takeInfoFile(cell))
-                                lastTakeReport = describe(cell, info, takeRoute, takeCalibratedMs)
-
-                                takeVersions[cell] = takeVersions[cell] + 1
-                                // Move on to the next empty cell, if there is one.
-                                val nextEmpty = (0 until takeCount).firstOrNull { !project.hasTake(it) }
-                                if (nextEmpty != null) selected = nextEmpty
+                    scope.launch {
+                        try {
+                            // The engine provides the shared clock, so it runs while recording even
+                            // with the click off (it then just plays silence).
+                            if (!AudioEngine.isRunning && !AudioEngine.start()) {
+                                error = "Couldn't start the audio engine"
+                                return@launch
                             }
-                            .onFailure {
-                                wavTemp.delete()
-                                error = it.message ?: "Recording failed"
+                            // Other takes become backing tracks (muted ones at volume 0, so their
+                            // videos still play along). They start in the same callback as the recording.
+                            val placed = PreviewLoader.load(project, fallbackRoundTripMs = calibratedMs, exclude = cell)
+                            videoSync.placement = placed.associateBy { it.index }
+
+                            // Starts mic capture, beat 1 and backing playback in the same audio callback.
+                            if (!AudioEngine.startRecording(wavTemp)) {
+                                error = "Couldn't open the mic in the audio engine"
+                                AudioEngine.clearTracks()
+                                if (!metronomeOn) AudioEngine.stop()
+                                return@launch
                             }
+                        } finally {
+                            preparing = false
+                        }
+
+                        isRecording = true
+                        recorder.start(project.takeFile(cell)) { result ->
+                            isRecording = false
+                            // Normally already stopped by the button; this covers camera-side failures.
+                            val info = engineInfo ?: AudioEngine.stopRecording()
+                            AudioEngine.clearTracks()
+                            if (!metronomeOn) AudioEngine.stop()
+
+                            result
+                                .onSuccess {
+                                    project.takeAlignFile(cell).delete()
+                                    project.takeAudioFile(cell).delete()
+                                    wavTemp.renameTo(project.takeAudioFile(cell))
+                                    TakeInfo.from(
+                                        info, bpm, beatsPerBar, metronomeOn,
+                                        route = takeRoute.key,
+                                        calibratedRoundTripMs = takeCalibratedMs,
+                                    ).writeTo(project.takeInfoFile(cell))
+                                    lastTakeReport = describe(cell, info, takeRoute, takeCalibratedMs)
+
+                                    // Line up the new video now, so the next record/preview starts quickly.
+                                    scope.launch {
+                                        withContext(Dispatchers.Default) {
+                                            TakeAligner.align(
+                                                project.takeFile(cell),
+                                                readEngineWav(project.takeAudioFile(cell)),
+                                                info.sampleRate,
+                                            )?.writeTo(project.takeAlignFile(cell))
+                                        }
+                                    }
+
+                                    takeVersions[cell] = takeVersions[cell] + 1
+                                    // Move on to the next empty cell, if there is one.
+                                    val nextEmpty = (0 until takeCount).firstOrNull { !project.hasTake(it) }
+                                    if (nextEmpty != null) selected = nextEmpty
+                                }
+                                .onFailure {
+                                    wavTemp.delete()
+                                    error = it.message ?: "Recording failed"
+                                }
+                        }
                     }
                 }
             },
@@ -405,6 +481,26 @@ fun GridRecordScreen(
                 }
             }
         }
+    }
+
+    volumeDialogFor?.let { index ->
+        AlertDialog(
+            onDismissRequest = { volumeDialogFor = null },
+            title = { Text("Take ${index + 1} volume: ${(project.volume[index] * 100).roundToInt()}%") },
+            text = {
+                Column {
+                    Slider(
+                        value = project.volume[index],
+                        onValueChange = { project.volume[index] = it },
+                        valueRange = 0f..1f,
+                    )
+                    if (project.muted[index]) {
+                        Text("This take is muted - unmute it to hear the change.", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { volumeDialogFor = null }) { Text("Done") } },
+        )
     }
 
     if (confirmExit) {
@@ -419,6 +515,19 @@ fun GridRecordScreen(
                 TextButton(onClick = { confirmExit = false }) { Text("Stay") }
             },
         )
+    }
+}
+
+@Composable
+private fun CellPill(text: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, color = Color.White, style = MaterialTheme.typography.labelMedium, maxLines = 1)
     }
 }
 

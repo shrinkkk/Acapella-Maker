@@ -1,6 +1,7 @@
 #pragma once
 
 #include <oboe/Oboe.h>
+#include <array>
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -25,8 +26,10 @@ struct RecordingInfo {
 struct PlaybackTrack {
     std::vector<float> samples;
     int64_t startFrame = 0;
-    float gain = 1.0f;
+    int slot = 0;  // which take (gain is looked up per slot, so it can change while playing)
 };
+
+constexpr int kMaxSlots = 16;
 
 /**
  * Low-latency audio engine.
@@ -44,6 +47,10 @@ struct PlaybackTrack {
 class AudioEngine : public oboe::AudioStreamDataCallback,
                     public oboe::AudioStreamErrorCallback {
 public:
+    AudioEngine() {
+        for (auto &g : mSlotGains) g.store(1.0f);
+    }
+
     bool start();
     void stop();
 
@@ -62,8 +69,11 @@ public:
     // Playback of recorded takes on the shared timeline (timeline frame 0 = beat 1).
     // Tracks may only be added/cleared while playback is stopped.
     void clearTracks();
-    void addTrack(std::vector<float> samples, int64_t startFrame, float gain);
-    bool startPlayback();
+    void addTrack(std::vector<float> samples, int64_t startFrame, int slot);
+    /** Volume for a take (0 = muted). Safe to call any time, including while playing. */
+    void setSlotGain(int slot, float gain);
+    /** Starts playback from timeline frame 0; [loop] repeats at the end (preview). */
+    bool startPlayback(bool loop);
     void stopPlayback();
     bool isPlaying() const { return mPlaying.load(); }
     /** Timeline frame of the next audio frame to be rendered. */
@@ -125,6 +135,10 @@ private:
     std::atomic<bool> mPlaying{false};
     std::atomic<int64_t> mPlayFrame{0};
     int64_t mPlayEnd = 0;
+    std::atomic<bool> mLoop{true};
+    // Recording with backing tracks: playback starts in the same callback as the recording.
+    std::atomic<bool> mPlayWithRecording{false};
+    std::array<std::atomic<float>, kMaxSlots> mSlotGains{};
 
     // Recording
     std::atomic<bool> mRecordRequested{false};

@@ -113,24 +113,31 @@ void AudioEngine::clearTracks() {
     mPlayEnd = 0;
 }
 
-void AudioEngine::addTrack(std::vector<float> samples, int64_t startFrame, float gain) {
-    if (mPlaying.load()) return;
+void AudioEngine::addTrack(std::vector<float> samples, int64_t startFrame, int slot) {
+    if (mPlaying.load() || slot < 0 || slot >= kMaxSlots) return;
     PlaybackTrack track;
     track.startFrame = startFrame;
-    track.gain = gain;
+    track.slot = slot;
     track.samples = std::move(samples);
     mPlayEnd = std::max(mPlayEnd, track.startFrame + static_cast<int64_t>(track.samples.size()));
     mTracks.push_back(std::move(track));
 }
 
-bool AudioEngine::startPlayback() {
+void AudioEngine::setSlotGain(int slot, float gain) {
+    if (slot < 0 || slot >= kMaxSlots) return;
+    mSlotGains[slot].store(gain, std::memory_order_relaxed);
+}
+
+bool AudioEngine::startPlayback(bool loop) {
     if (!mRunning.load() || mTracks.empty() || mPlayEnd <= 0) return false;
+    mLoop.store(loop);
     mPlayFrame.store(0);
     mPlaying.store(true);
     return true;
 }
 
 void AudioEngine::stopPlayback() {
+    mPlayWithRecording.store(false);
     if (!mPlaying.load()) return;
     mPlaying.store(false);
     // Let an in-flight callback finish reading the tracks.
@@ -210,6 +217,8 @@ bool AudioEngine::startRecording(const std::string &wavPath) {
     mWriterStop.store(false);
     mWriterThread = std::thread(&AudioEngine::writerLoop, this);
 
+    // Backing takes (if any were added) start at timeline frame 0 in that same callback.
+    mPlayWithRecording.store(!mTracks.empty() && mPlayEnd > 0);
     // Both take effect at the start of the same callback: beat 1 == first recorded frame.
     mRestartRequested.store(true);
     mRecordRequested.store(true);
@@ -307,11 +316,17 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream, vo
             }
         }
         mRecording.store(true);
+        if (mPlayWithRecording.exchange(false)) {
+            mLoop.store(false);
+            mPlayFrame.store(0);
+            mPlaying.store(true);
+        }
     } else if (mRecording.load()) {
         captureInput();
     }
 
-    const bool playing = mPlaying.load();
+    const bool playing = mPlaying.load();  // read after the record-start block above
+    const bool loop = mLoop.load();
     int64_t playFrame = mPlayFrame.load();
 
     for (int32_t i = 0; i < numFrames; ++i, ++frame) {
@@ -339,10 +354,12 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream, vo
             for (const auto &track : mTracks) {
                 const int64_t k = playFrame - track.startFrame;
                 if (k >= 0 && k < static_cast<int64_t>(track.samples.size())) {
-                    sample += track.samples[static_cast<size_t>(k)] * track.gain;
+                    sample += track.samples[static_cast<size_t>(k)] *
+                              mSlotGains[track.slot].load(std::memory_order_relaxed);
                 }
             }
-            if (++playFrame >= mPlayEnd) playFrame = 0;  // loop from beat 1
+            ++playFrame;
+            if (playFrame >= mPlayEnd && loop) playFrame = 0;  // preview loops from beat 1
         }
         sample = std::max(-1.0f, std::min(1.0f, sample));
 

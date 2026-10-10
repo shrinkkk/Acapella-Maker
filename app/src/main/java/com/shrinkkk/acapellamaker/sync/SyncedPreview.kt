@@ -29,11 +29,16 @@ object PreviewLoader {
      * Aligns takes (cached per take), loads their engine audio into the engine shifted back by
      * the measured round trip, and returns where each video belongs on the timeline.
      */
-    suspend fun load(project: Project, fallbackRoundTripMs: Double?): List<PlacedTake> =
+    suspend fun load(
+        project: Project,
+        fallbackRoundTripMs: Double?,
+        exclude: Int? = null,
+    ): List<PlacedTake> =
         withContext(Dispatchers.Default) {
             AudioEngine.clearTracks()
             val placed = mutableListOf<PlacedTake>()
             for (i in 0 until project.layout.takeCount) {
+                if (i == exclude) continue
                 if (!project.hasTake(i) || !project.takeAudioFile(i).exists()) continue
                 val info = TakeInfo.read(project.takeInfoFile(i))
                 val sampleRate = info?.sampleRate ?: AudioEngine.sampleRate
@@ -47,7 +52,8 @@ object PreviewLoader {
 
                 // Recorded sample k belongs at timeline frame k - roundTrip.
                 val roundTripFrames = (roundTripMs * sampleRate / 1000.0).roundToLong()
-                AudioEngine.addTrack(audio, startFrame = -roundTripFrames)
+                AudioEngine.setTakeGain(i, project.gainFor(i))
+                AudioEngine.addTrack(audio, startFrame = -roundTripFrames, slot = i)
 
                 val videoZeroInWav = if (reliable) alignment!!.videoZeroInWavMs else 0.0
                 placed += PlacedTake(
@@ -63,11 +69,16 @@ object PreviewLoader {
 }
 
 /**
- * Keeps muted video players following the engine's audio. Audio is the master: videos are
- * started, paused and nudged (seek) to match what is currently being heard.
+ * Keeps muted video players following the engine's audio. Audio is the master.
+ *
+ * Small drift is corrected by playing the video very slightly faster/slower (invisible), and
+ * only large jumps (start, loop, big drift) use a seek, because seeking makes video stutter.
  */
 class VideoSyncController {
-    private class Entry(val player: MediaPlayer, var lastSeekAt: Long = 0L)
+    private class Entry(val player: MediaPlayer) {
+        var lastSeekAt = 0L
+        var speed = 1f
+    }
 
     private val players = mutableMapOf<Int, Entry>()
     var placement: Map<Int, PlacedTake> = emptyMap()
@@ -87,29 +98,52 @@ class VideoSyncController {
         for ((index, entry) in players) {
             val take = placement[index] ?: continue
             val player = entry.player
-            val duration = player.duration.toLong()
-            if (duration <= 0) continue
-            val target = (heardMs - take.videoStartMs).roundToLong()
             try {
+                val duration = player.duration.toLong()
+                if (duration <= 0) continue
+                val target = (heardMs - take.videoStartMs).roundToLong()
+
                 if (target < 0 || target >= duration) {
+                    // Before this take starts / after it ends: hold still.
                     if (player.isPlaying) player.pause()
                     val parkAt = target.coerceIn(0L, duration - 1)
-                    if (abs(player.currentPosition - parkAt) > 100 && now - entry.lastSeekAt > 300) {
+                    if (abs(player.currentPosition - parkAt) > 200 && now - entry.lastSeekAt > 500) {
                         player.seekTo(parkAt, MediaPlayer.SEEK_CLOSEST)
                         entry.lastSeekAt = now
                     }
-                } else if (!player.isPlaying) {
+                    continue
+                }
+
+                if (!player.isPlaying) {
                     player.seekTo(target, MediaPlayer.SEEK_CLOSEST)
+                    setSpeed(entry, 1f)
                     player.start()
                     entry.lastSeekAt = now
-                } else if (abs(player.currentPosition - target) > 80 && now - entry.lastSeekAt > 500) {
-                    // Drifted: nudge back. Cooldown avoids fighting a seek that's still settling.
-                    player.seekTo(target, MediaPlayer.SEEK_CLOSEST)
-                    entry.lastSeekAt = now
+                    continue
+                }
+                if (now - entry.lastSeekAt < 400) continue  // let a seek settle before judging drift
+
+                val drift = player.currentPosition - target  // > 0: video ahead of audio
+                when {
+                    abs(drift) > 250 -> {
+                        player.seekTo(target, MediaPlayer.SEEK_CLOSEST)
+                        entry.lastSeekAt = now
+                    }
+                    drift > 45 -> setSpeed(entry, 0.95f)
+                    drift < -45 -> setSpeed(entry, 1.05f)
+                    abs(drift) < 12 -> setSpeed(entry, 1f)
                 }
             } catch (e: IllegalStateException) {
                 // Player being released; ignore.
             }
         }
+    }
+
+    private fun setSpeed(entry: Entry, speed: Float) {
+        if (entry.speed == speed) return
+        // Setting playback params on a paused player would start it, so only while playing.
+        if (!entry.player.isPlaying) return
+        entry.player.playbackParams = entry.player.playbackParams.setSpeed(speed)
+        entry.speed = speed
     }
 }

@@ -55,11 +55,19 @@ object AudioEngine {
     /** Removes all playback tracks (stops playback first). */
     fun clearTracks() = nativeClearTracks()
 
-    /** Sample k of [samples] plays at timeline frame [startFrame] + k. Only while stopped. */
-    fun addTrack(samples: FloatArray, startFrame: Long, gain: Float = 1f) =
-        nativeAddTrack(samples, startFrame, gain)
+    /**
+     * Sample k of [samples] plays at timeline frame [startFrame] + k. Only while stopped.
+     * [slot] is the take index; its volume is set with [setTakeGain].
+     * Tracks added before [startRecording] play as backing, starting exactly with the recording.
+     */
+    fun addTrack(samples: FloatArray, startFrame: Long, slot: Int) =
+        nativeAddTrack(samples, startFrame, slot)
 
-    fun startPlayback(): Boolean = nativeStartPlayback()
+    /** Volume of a take, 0 = muted. Can change while playing or recording. */
+    fun setTakeGain(slot: Int, gain: Float) = nativeSetSlotGain(slot, gain)
+
+    /** [loop]: repeat from beat 1 at the end (preview). */
+    fun startPlayback(loop: Boolean = true): Boolean = nativeStartPlayback(loop)
     fun stopPlayback() = nativeStopPlayback()
 
     /** Timeline frame about to be rendered (not yet heard: add output delay). Loops at the end. */
@@ -75,8 +83,9 @@ object AudioEngine {
     private external fun nativeStartRecording(path: String): Boolean
     private external fun nativeStopRecording(): DoubleArray
     private external fun nativeClearTracks()
-    private external fun nativeAddTrack(samples: FloatArray, startFrame: Long, gain: Float)
-    private external fun nativeStartPlayback(): Boolean
+    private external fun nativeAddTrack(samples: FloatArray, startFrame: Long, slot: Int)
+    private external fun nativeSetSlotGain(slot: Int, gain: Float)
+    private external fun nativeStartPlayback(loop: Boolean): Boolean
     private external fun nativeStopPlayback()
     private external fun nativePlaybackFrame(): Long
     private external fun nativePlaybackEndFrame(): Long

@@ -85,15 +85,19 @@ JNIEXPORT void JNICALL JNI_FN(nativeClearTracks)(JNIEnv *, jobject) {
 }
 
 JNIEXPORT void JNICALL JNI_FN(nativeAddTrack)(JNIEnv *env, jobject, jfloatArray samples,
-                                               jlong startFrame, jfloat gain) {
+                                               jlong startFrame, jint slot) {
     const jsize length = env->GetArrayLength(samples);
     std::vector<float> copy(static_cast<size_t>(length));
     env->GetFloatArrayRegion(samples, 0, length, copy.data());
-    engine().addTrack(std::move(copy), static_cast<int64_t>(startFrame), gain);
+    engine().addTrack(std::move(copy), static_cast<int64_t>(startFrame), slot);
 }
 
-JNIEXPORT jboolean JNICALL JNI_FN(nativeStartPlayback)(JNIEnv *, jobject) {
-    return engine().startPlayback() ? JNI_TRUE : JNI_FALSE;
+JNIEXPORT void JNICALL JNI_FN(nativeSetSlotGain)(JNIEnv *, jobject, jint slot, jfloat gain) {
+    engine().setSlotGain(slot, gain);
+}
+
+JNIEXPORT jboolean JNICALL JNI_FN(nativeStartPlayback)(JNIEnv *, jobject, jboolean loop) {
+    return engine().startPlayback(loop == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL JNI_FN(nativeStopPlayback)(JNIEnv *, jobject) {
