@@ -52,8 +52,10 @@ Open questions (to decide later):
 3. Record a single video take and play it back - done
 4. Project setup (take count + layout) + grid record screen - done
 5. Oboe audio engine + metronome (slider, tap tempo, time signatures) - done
-6. Record audio through Oboe in sync with the metronome (take_N.wav + take_N.json alongside the video)
+6. Record audio through Oboe in sync with the metronome (take_N.wav + take_N.json alongside the video) - done
 7. Recorded cells play back in sync while recording a new take (backing track), with per-cell mute
-8. Latency calibration screen + offset compensation
+8. Latency calibration screen + offset compensation - done (moved before 7)
+   - Video alignment: camera audio matched against engine audio (1 ms envelopes) -> take_N.align.json
+   - Synced preview: engine plays all takes shifted by the measured delay; muted videos follow the audio
 9. Per-take controls (volume, nudge, re-record)
 10. Export grid video to MP4 (same crop as on screen)

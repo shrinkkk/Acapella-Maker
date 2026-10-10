@@ -1,13 +1,11 @@
 package com.shrinkkk.acapellamaker.calibration
 
 import com.shrinkkk.acapellamaker.audio.AudioEngine
+import com.shrinkkk.acapellamaker.audio.readEngineWav
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.RandomAccessFile
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -54,7 +52,7 @@ object LatencyCalibrator {
             }
             val outId = AudioEngine.outputDeviceId
             val inId = AudioEngine.inputDeviceId
-            return withContext(Dispatchers.Default) { analyse(readWavMono16(wav), info.sampleRate) }
+            return withContext(Dispatchers.Default) { analyse(readEngineWav(wav), info.sampleRate) }
                 .map { it.copy(outputDeviceId = outId, inputDeviceId = inId) }
         } finally {
             AudioEngine.setMetronomeEnabled(false)
@@ -111,17 +109,5 @@ object LatencyCalibrator {
             )
         }
         return Result.success(CalibrationResult(median, spread, delaysMs.size, CLICKS - 1))
-    }
-
-    /** Reads the engine's own WAV format: 44-byte header, mono 16-bit PCM. */
-    private fun readWavMono16(file: File): FloatArray {
-        RandomAccessFile(file, "r").use { raf ->
-            val dataBytes = (raf.length() - 44).toInt().coerceAtLeast(0)
-            val bytes = ByteArray(dataBytes)
-            raf.seek(44)
-            raf.readFully(bytes)
-            val shorts = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
-            return FloatArray(shorts.remaining()) { shorts.get(it) / 32768f }
-        }
     }
 }

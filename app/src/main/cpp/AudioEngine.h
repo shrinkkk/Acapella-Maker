@@ -21,6 +21,13 @@ struct RecordingInfo {
     int64_t overflowFrames = 0;    // frames dropped because the writer fell behind (should be 0)
 };
 
+/** A take's audio for playback: sample k plays at timeline frame (startFrame + k). */
+struct PlaybackTrack {
+    std::vector<float> samples;
+    int64_t startFrame = 0;
+    float gain = 1.0f;
+};
+
 /**
  * Low-latency audio engine.
  *
@@ -51,6 +58,17 @@ public:
     /** Opens the mic and starts writing a WAV at the next callback (with a beat restart). */
     bool startRecording(const std::string &wavPath);
     RecordingInfo stopRecording();
+
+    // Playback of recorded takes on the shared timeline (timeline frame 0 = beat 1).
+    // Tracks may only be added/cleared while playback is stopped.
+    void clearTracks();
+    void addTrack(std::vector<float> samples, int64_t startFrame, float gain);
+    bool startPlayback();
+    void stopPlayback();
+    bool isPlaying() const { return mPlaying.load(); }
+    /** Timeline frame of the next audio frame to be rendered. */
+    int64_t playbackFrame() const { return mPlayFrame.load(); }
+    int64_t playbackEndFrame() const { return mPlayEnd; }
 
     int64_t framesRendered() const { return mFramesRendered.load(); }
     int64_t beatsStarted() const { return mBeatsStarted.load(); }
@@ -101,6 +119,12 @@ private:
 
     std::vector<float> mClickNormal;
     std::vector<float> mClickAccentSamples;
+
+    // Playback
+    std::vector<PlaybackTrack> mTracks;   // only changed while !mPlaying
+    std::atomic<bool> mPlaying{false};
+    std::atomic<int64_t> mPlayFrame{0};
+    int64_t mPlayEnd = 0;
 
     // Recording
     std::atomic<bool> mRecordRequested{false};

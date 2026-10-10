@@ -43,6 +43,27 @@ data class TakeInfo(
     }
 
     companion object {
+        /** Reads the fields needed for playback; null if the file is missing or unreadable. */
+        fun read(file: File): TakeInfo? = try {
+            val j = JSONObject(file.readText())
+            fun optDouble(key: String): Double? = if (j.isNull(key)) null else j.optDouble(key)
+            TakeInfo(
+                sampleRate = j.getInt("sampleRate"),
+                framesCaptured = j.optLong("framesCaptured"),
+                estimatedRoundTripMs = optDouble("estimatedRoundTripMs"),
+                outputLatencyMs = optDouble("outputLatencyMs"),
+                inputLatencyMs = optDouble("inputLatencyMs"),
+                peak = j.optDouble("peak", 0.0).toFloat(),
+                bpm = j.optInt("bpm", 100),
+                beatsPerBar = j.optInt("beatsPerBar", 4),
+                metronomeOn = j.optBoolean("metronomeOn"),
+                route = j.optString("route", "speaker"),
+                calibratedRoundTripMs = optDouble("calibratedRoundTripMs"),
+            )
+        } catch (e: Exception) {
+            null
+        }
+
         fun from(
             info: EngineRecordingInfo,
             bpm: Int,

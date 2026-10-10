@@ -50,6 +50,22 @@ object AudioEngine {
     val framesRendered: Long get() = nativeFramesRendered()
     val sampleRate: Int get() = nativeSampleRate()
 
+    // --- Playback of recorded takes on the shared timeline (frame 0 = beat 1) ---
+
+    /** Removes all playback tracks (stops playback first). */
+    fun clearTracks() = nativeClearTracks()
+
+    /** Sample k of [samples] plays at timeline frame [startFrame] + k. Only while stopped. */
+    fun addTrack(samples: FloatArray, startFrame: Long, gain: Float = 1f) =
+        nativeAddTrack(samples, startFrame, gain)
+
+    fun startPlayback(): Boolean = nativeStartPlayback()
+    fun stopPlayback() = nativeStopPlayback()
+
+    /** Timeline frame about to be rendered (not yet heard: add output delay). Loops at the end. */
+    val playbackFrame: Long get() = nativePlaybackFrame()
+    val playbackEndFrame: Long get() = nativePlaybackEndFrame()
+
     /** AudioDeviceInfo id of the output in use (0 if unknown). */
     val outputDeviceId: Int get() = nativeOutputDeviceId()
 
@@ -58,6 +74,12 @@ object AudioEngine {
 
     private external fun nativeStartRecording(path: String): Boolean
     private external fun nativeStopRecording(): DoubleArray
+    private external fun nativeClearTracks()
+    private external fun nativeAddTrack(samples: FloatArray, startFrame: Long, gain: Float)
+    private external fun nativeStartPlayback(): Boolean
+    private external fun nativeStopPlayback()
+    private external fun nativePlaybackFrame(): Long
+    private external fun nativePlaybackEndFrame(): Long
     private external fun nativeOutputDeviceId(): Int
     private external fun nativeInputDeviceId(): Int
     private external fun nativeStart(): Boolean

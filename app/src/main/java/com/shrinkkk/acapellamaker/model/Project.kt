@@ -19,6 +19,9 @@ class Project(val layout: GridLayout, val dir: File) {
     /** Sync metadata for the take (see TakeInfo). */
     fun takeInfoFile(index: Int): File = File(dir, "take_${index + 1}.json")
 
+    /** Cached video-to-engine-audio alignment (see TakeAligner). Deleted when the take is re-recorded. */
+    fun takeAlignFile(index: Int): File = File(dir, "take_${index + 1}.align.json")
+
     fun hasTake(index: Int): Boolean = takeFile(index).exists()
 
     fun hasAnyTake(): Boolean = (0 until layout.takeCount).any(::hasTake)

@@ -13,49 +13,16 @@ import androidx.compose.ui.viewinterop.AndroidView
 import java.io.File
 
 /**
- * Starts a group of MediaPlayers together once all are prepared, and restarts them together
- * once all have finished.
- *
- * This is a ROUGH preview: separate players each start a few ms apart and run on their own
- * clocks. Proper, sample-accurate playback through the audio engine comes in a later step.
+ * Shows [file] inside the cell, centre-cropped exactly like the live camera preview.
+ * The player is handed out via [onReady] once prepared; whoever receives it controls playback.
  */
-class GroupPlayback(private val expected: Int) {
-    private val players = mutableListOf<MediaPlayer>()
-    private var prepared = 0
-    private var completed = 0
-
-    fun add(player: MediaPlayer) {
-        players += player
-    }
-
-    fun remove(player: MediaPlayer) {
-        players -= player
-    }
-
-    fun onPrepared() {
-        prepared++
-        if (prepared == expected) startAll()
-    }
-
-    fun onCompleted() {
-        completed++
-        if (completed >= players.size) {
-            completed = 0
-            startAll()
-        }
-    }
-
-    private fun startAll() {
-        players.forEach {
-            it.seekTo(0)
-            it.start()
-        }
-    }
-}
-
-/** Plays [file] inside the cell, centre-cropped exactly like the live camera preview. */
 @Composable
-fun CroppedTakeVideo(file: File, group: GroupPlayback, modifier: Modifier = Modifier) {
+fun CroppedTakeVideo(
+    file: File,
+    onReady: (MediaPlayer) -> Unit,
+    onReleased: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     AndroidView(
         modifier = modifier.fillMaxSize(),
         factory = { context ->
@@ -73,9 +40,7 @@ fun CroppedTakeVideo(file: File, group: GroupPlayback, modifier: Modifier = Modi
                         player = MediaPlayer().apply {
                             setDataSource(file.absolutePath)
                             setSurface(s)
-                            setOnPreparedListener { group.onPrepared() }
-                            setOnCompletionListener { group.onCompleted() }
-                            group.add(this)
+                            setOnPreparedListener { onReady(it) }
                             prepareAsync()
                         }
                     }
@@ -86,7 +51,7 @@ fun CroppedTakeVideo(file: File, group: GroupPlayback, modifier: Modifier = Modi
 
                     override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
                         player?.let {
-                            group.remove(it)
+                            onReleased()
                             it.release()
                         }
                         player = null

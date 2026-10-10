@@ -58,6 +58,9 @@ import com.shrinkkk.acapellamaker.audio.EngineRecordingInfo
 import com.shrinkkk.acapellamaker.calibration.AudioRoute
 import com.shrinkkk.acapellamaker.calibration.CalibrationStore
 import com.shrinkkk.acapellamaker.model.TakeInfo
+import com.shrinkkk.acapellamaker.sync.PlacedTake
+import com.shrinkkk.acapellamaker.sync.PreviewLoader
+import com.shrinkkk.acapellamaker.sync.VideoSyncController
 import com.shrinkkk.acapellamaker.camera.TakeRecorder
 import com.shrinkkk.acapellamaker.model.GridLayouts
 import com.shrinkkk.acapellamaker.model.Project
@@ -108,10 +111,11 @@ fun GridRecordScreen(
     // Route and delay in effect for the take being recorded.
     var takeRoute by remember { mutableStateOf(route) }
     var takeCalibratedMs by remember { mutableStateOf<Double?>(null) }
+
     // Fresh group each time preview starts, sized to the takes that exist right now.
-    val previewGroup = remember(previewing) {
-        if (previewing) GroupPlayback((0 until takeCount).count { project.hasTake(it) }) else null
-    }
+    val videoSync = remember { VideoSyncController() }
+    // Takes placed on the timeline for the current preview; null while lining them up.
+    var placedTakes by remember { mutableStateOf<List<PlacedTake>?>(null) }
     // Bumped when a cell's take changes, so its thumbnail reloads.
     val takeVersions = remember { mutableStateListOf<Int>().apply { repeat(takeCount) { add(0) } } }
 
@@ -176,6 +180,40 @@ fun GridRecordScreen(
         }
     }
 
+    // --- Synced preview: engine plays the takes' audio, videos follow it ---
+    LaunchedEffect(previewing) {
+        if (!previewing) return@LaunchedEffect
+        placedTakes = null
+        try {
+            val placed = PreviewLoader.load(project, fallbackRoundTripMs = calibratedMs)
+            videoSync.placement = placed.associateBy { it.index }
+            placedTakes = placed
+            if (!AudioEngine.isRunning && !AudioEngine.start()) {
+                error = "Couldn't start the audio engine"
+                previewing = false
+                return@LaunchedEffect
+            }
+            if (!AudioEngine.startPlayback()) {
+                error = "Nothing to play"
+                previewing = false
+                return@LaunchedEffect
+            }
+            // What's heard lags what's rendered by the output delay; half the round trip is
+            // a reasonable estimate (only affects video, where ~30 ms is a single frame).
+            val outputDelayMs = (calibratedMs ?: 80.0) / 2
+            val sampleRate = AudioEngine.sampleRate.toDouble()
+            while (true) {
+                withFrameNanos { }
+                val heardMs = AudioEngine.playbackFrame * 1000.0 / sampleRate - outputDelayMs
+                videoSync.sync(heardMs)
+            }
+        } finally {
+            AudioEngine.clearTracks()
+            if (!metronomeOn) AudioEngine.stop()
+            placedTakes = null
+        }
+    }
+
     BackHandler(enabled = !isRecording) {
         when {
             previewing -> previewing = false
@@ -195,7 +233,7 @@ fun GridRecordScreen(
         StatusLine(
             text = when {
                 error != null -> error!!
-                previewing -> "Rough preview - takes aren't synced to each other yet"
+                previewing -> placedTakes?.let { describePreview(it) } ?: "Lining up takes…"
                 lastTakeReport != null && !isRecording -> lastTakeReport!!
                 calibratedMs == null -> "Not calibrated for ${route.label} - tap Calibrate"
                 isRecording -> "● Recording take ${selected + 1}   ${formatElapsed(elapsedMs)}"
@@ -227,7 +265,11 @@ fun GridRecordScreen(
                 ) {
                     when {
                         previewing -> if (project.hasTake(index)) {
-                            CroppedTakeVideo(file = project.takeFile(index), group = previewGroup!!)
+                            CroppedTakeVideo(
+                                file = project.takeFile(index),
+                                onReady = { videoSync.register(index, it) },
+                                onReleased = { videoSync.unregister(index) },
+                            )
                         }
                         isSelected -> CameraPreview(
                             lifecycleOwner = lifecycleOwner,
@@ -334,6 +376,7 @@ fun GridRecordScreen(
 
                         result
                             .onSuccess {
+                                project.takeAlignFile(cell).delete()
                                 project.takeAudioFile(cell).delete()
                                 wavTemp.renameTo(project.takeAudioFile(cell))
                                 TakeInfo.from(
@@ -449,6 +492,17 @@ private fun describe(cell: Int, info: EngineRecordingInfo, route: AudioRoute, ca
     }
     return "Take ${cell + 1} saved · engine audio %.1f s · peak %.0f dB · delay %s%s"
         .format(info.seconds, info.peakDb, latency, warning)
+}
+
+/** e.g. "Synced · camera started +132, +87 ms · delay 115 ms" */
+private fun describePreview(placed: List<PlacedTake>): String {
+    if (placed.isEmpty()) return "No engine audio for these takes - record them again"
+    val camera = placed.joinToString(", ") { p ->
+        p.cameraDelayMs?.let { "%+.0f".format(it) } ?: "?"
+    }
+    val delays = placed.map { it.roundTripMs }.distinct().joinToString("/") { "%.0f".format(it) }
+    val warning = if (placed.any { !it.alignmentReliable }) " · ? = couldn't line up video" else ""
+    return "Synced preview · camera start %s ms · delay %s ms%s".format(camera, delays, warning)
 }
 
 private fun formatElapsed(ms: Long): String {

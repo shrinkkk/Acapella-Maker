@@ -43,6 +43,7 @@ bool AudioEngine::start() {
 
 void AudioEngine::stop() {
     if (isRecording()) stopRecording();
+    stopPlayback();
     std::lock_guard<std::mutex> lock(mLock);
     mRunning.store(false);
     if (mStream) {
@@ -102,6 +103,38 @@ void AudioEngine::buildClicks(int32_t sampleRate) {
     };
     mClickNormal = make(1000.0);
     mClickAccentSamples = make(1600.0);
+}
+
+// ---------------------------------------------------------------- playback
+
+void AudioEngine::clearTracks() {
+    stopPlayback();
+    mTracks.clear();
+    mPlayEnd = 0;
+}
+
+void AudioEngine::addTrack(std::vector<float> samples, int64_t startFrame, float gain) {
+    if (mPlaying.load()) return;
+    PlaybackTrack track;
+    track.startFrame = startFrame;
+    track.gain = gain;
+    track.samples = std::move(samples);
+    mPlayEnd = std::max(mPlayEnd, track.startFrame + static_cast<int64_t>(track.samples.size()));
+    mTracks.push_back(std::move(track));
+}
+
+bool AudioEngine::startPlayback() {
+    if (!mRunning.load() || mTracks.empty() || mPlayEnd <= 0) return false;
+    mPlayFrame.store(0);
+    mPlaying.store(true);
+    return true;
+}
+
+void AudioEngine::stopPlayback() {
+    if (!mPlaying.load()) return;
+    mPlaying.store(false);
+    // Let an in-flight callback finish reading the tracks.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
 }
 
 // ---------------------------------------------------------------- input / recording
@@ -278,6 +311,9 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream, vo
         captureInput();
     }
 
+    const bool playing = mPlaying.load();
+    int64_t playFrame = mPlayFrame.load();
+
     for (int32_t i = 0; i < numFrames; ++i, ++frame) {
         if (static_cast<double>(frame) >= mNextBeatFrame) {
             mClickAccent = (mBeatIndex % beatsPerBar) == 0;
@@ -299,11 +335,23 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(oboe::AudioStream *stream, vo
             }
         }
 
+        if (playing) {
+            for (const auto &track : mTracks) {
+                const int64_t k = playFrame - track.startFrame;
+                if (k >= 0 && k < static_cast<int64_t>(track.samples.size())) {
+                    sample += track.samples[static_cast<size_t>(k)] * track.gain;
+                }
+            }
+            if (++playFrame >= mPlayEnd) playFrame = 0;  // loop from beat 1
+        }
+        sample = std::max(-1.0f, std::min(1.0f, sample));
+
         for (int32_t c = 0; c < channels; ++c) {
             out[i * channels + c] = sample;
         }
     }
 
+    if (playing) mPlayFrame.store(playFrame);
     mFramesRendered.store(frame);
     return oboe::DataCallbackResult::Continue;
 }

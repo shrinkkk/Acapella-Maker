@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <memory>
 #include <string>
+#include <vector>
 #include "AudioEngine.h"
 
 namespace {
@@ -77,6 +78,34 @@ JNIEXPORT jdoubleArray JNICALL JNI_FN(nativeStopRecording)(JNIEnv *env, jobject)
     jdoubleArray result = env->NewDoubleArray(6);
     env->SetDoubleArrayRegion(result, 0, 6, values);
     return result;
+}
+
+JNIEXPORT void JNICALL JNI_FN(nativeClearTracks)(JNIEnv *, jobject) {
+    engine().clearTracks();
+}
+
+JNIEXPORT void JNICALL JNI_FN(nativeAddTrack)(JNIEnv *env, jobject, jfloatArray samples,
+                                               jlong startFrame, jfloat gain) {
+    const jsize length = env->GetArrayLength(samples);
+    std::vector<float> copy(static_cast<size_t>(length));
+    env->GetFloatArrayRegion(samples, 0, length, copy.data());
+    engine().addTrack(std::move(copy), static_cast<int64_t>(startFrame), gain);
+}
+
+JNIEXPORT jboolean JNICALL JNI_FN(nativeStartPlayback)(JNIEnv *, jobject) {
+    return engine().startPlayback() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL JNI_FN(nativeStopPlayback)(JNIEnv *, jobject) {
+    engine().stopPlayback();
+}
+
+JNIEXPORT jlong JNICALL JNI_FN(nativePlaybackFrame)(JNIEnv *, jobject) {
+    return static_cast<jlong>(engine().playbackFrame());
+}
+
+JNIEXPORT jlong JNICALL JNI_FN(nativePlaybackEndFrame)(JNIEnv *, jobject) {
+    return static_cast<jlong>(engine().playbackEndFrame());
 }
 
 JNIEXPORT jint JNICALL JNI_FN(nativeOutputDeviceId)(JNIEnv *, jobject) {
