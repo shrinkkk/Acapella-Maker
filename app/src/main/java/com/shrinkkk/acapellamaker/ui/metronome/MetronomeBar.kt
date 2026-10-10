@@ -15,10 +15,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -29,7 +37,21 @@ import kotlin.math.roundToInt
 
 const val MIN_BPM = 40
 const val MAX_BPM = 240
-val BEATS_PER_BAR_OPTIONS = listOf(2, 3, 4, 6)
+
+/** Time signatures offered. The metronome clicks [beats] times per bar at the set BPM. */
+data class TimeSignature(val beats: Int, val label: String)
+
+val TIME_SIGNATURES = listOf(
+    TimeSignature(2, "2/4"),
+    TimeSignature(3, "3/4"),
+    TimeSignature(4, "4/4"),
+    TimeSignature(5, "5/4"),
+    TimeSignature(6, "6/8"),
+    TimeSignature(7, "7/8"),
+)
+
+fun timeSignatureLabel(beats: Int): String =
+    TIME_SIGNATURES.firstOrNull { it.beats == beats }?.label ?: "$beats/4"
 
 /**
  * Metronome controls: on/off, tempo (-/+ and tap tempo), beats per bar, and a beat indicator.
@@ -48,6 +70,8 @@ fun MetronomeBar(
     modifier: Modifier = Modifier,
 ) {
     val tapTimes = remember { ArrayDeque<Long>() }
+    var showBpmSlider by remember { mutableStateOf(false) }
+    var showTimeSigMenu by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -66,11 +90,15 @@ fun MetronomeBar(
                 onClick = { if (enabled) onToggle() },
             )
             Pill(text = "−", onClick = { if (enabled) onBpmChange((bpm - 1).coerceAtLeast(MIN_BPM)) })
+            // Tap the tempo to open a slider.
             Text(
                 "$bpm BPM",
                 color = Color.White,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.width(76.dp),
+                modifier = Modifier
+                    .width(76.dp)
+                    .clickable { if (enabled) showBpmSlider = true }
+                    .padding(vertical = 8.dp),
                 style = MaterialTheme.typography.titleSmall,
             )
             Pill(text = "+", onClick = { if (enabled) onBpmChange((bpm + 1).coerceAtMost(MAX_BPM)) })
@@ -86,11 +114,25 @@ fun MetronomeBar(
                     onBpmChange((60_000.0 / avgMs).roundToInt().coerceIn(MIN_BPM, MAX_BPM))
                 }
             })
-            Pill(text = "$beatsPerBar/4", onClick = {
-                if (!enabled) return@Pill
-                val i = BEATS_PER_BAR_OPTIONS.indexOf(beatsPerBar)
-                onBeatsPerBarChange(BEATS_PER_BAR_OPTIONS[(i + 1) % BEATS_PER_BAR_OPTIONS.size])
-            })
+            Box {
+                Pill(text = timeSignatureLabel(beatsPerBar) + " ▾", onClick = { if (enabled) showTimeSigMenu = true })
+                DropdownMenu(expanded = showTimeSigMenu, onDismissRequest = { showTimeSigMenu = false }) {
+                    TIME_SIGNATURES.forEach { sig ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    sig.label,
+                                    fontWeight = if (sig.beats == beatsPerBar) FontWeight.Bold else FontWeight.Normal,
+                                )
+                            },
+                            onClick = {
+                                onBeatsPerBarChange(sig.beats)
+                                showTimeSigMenu = false
+                            },
+                        )
+                    }
+                }
+            }
         }
 
         Row(
@@ -114,6 +156,31 @@ fun MetronomeBar(
                 )
             }
         }
+    }
+
+    if (showBpmSlider) {
+        AlertDialog(
+            onDismissRequest = { showBpmSlider = false },
+            title = { Text("Tempo: $bpm BPM") },
+            text = {
+                Column {
+                    // Changes apply live, so you can hear the new tempo while sliding.
+                    Slider(
+                        value = bpm.toFloat(),
+                        onValueChange = { onBpmChange(it.roundToInt().coerceIn(MIN_BPM, MAX_BPM)) },
+                        valueRange = MIN_BPM.toFloat()..MAX_BPM.toFloat(),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text("$MIN_BPM", style = MaterialTheme.typography.labelSmall)
+                        Text("$MAX_BPM", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showBpmSlider = false }) { Text("Done") } },
+        )
     }
 }
 
