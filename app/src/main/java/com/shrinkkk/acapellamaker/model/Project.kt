@@ -5,7 +5,14 @@ import java.io.File
 /** One acapella: a layout plus one video file per cell. Files live in app-private storage. */
 class Project(val layout: GridLayout, val dir: File) {
 
+    /** Video (with the camera's own audio track). */
     fun takeFile(index: Int): File = File(dir, "take_${index + 1}.mp4")
+
+    /** Audio recorded by the engine on the shared clock. This is the audio used for sync. */
+    fun takeAudioFile(index: Int): File = File(dir, "take_${index + 1}.wav")
+
+    /** Sync metadata for the take (see TakeInfo). */
+    fun takeInfoFile(index: Int): File = File(dir, "take_${index + 1}.json")
 
     fun hasTake(index: Int): Boolean = takeFile(index).exists()
 

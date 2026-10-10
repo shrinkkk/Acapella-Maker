@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -46,12 +47,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import com.shrinkkk.acapellamaker.audio.AudioEngine
+import com.shrinkkk.acapellamaker.audio.EngineRecordingInfo
+import com.shrinkkk.acapellamaker.model.TakeInfo
 import com.shrinkkk.acapellamaker.camera.TakeRecorder
 import com.shrinkkk.acapellamaker.model.GridLayouts
 import com.shrinkkk.acapellamaker.model.Project
@@ -83,6 +87,10 @@ fun GridRecordScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var confirmExit by remember { mutableStateOf(false) }
     var previewing by remember { mutableStateOf(false) }
+    // Engine-side result of the take being recorded, captured when Stop is pressed.
+    var engineInfo by remember { mutableStateOf<EngineRecordingInfo?>(null) }
+    // One-line report about the last take's engine audio (helps check the engine is capturing).
+    var lastTakeReport by remember { mutableStateOf<String?>(null) }
     // Fresh group each time preview starts, sized to the takes that exist right now.
     val previewGroup = remember(previewing) {
         if (previewing) GroupPlayback((0 until takeCount).count { project.hasTake(it) }) else null
@@ -166,6 +174,7 @@ fun GridRecordScreen(
             text = when {
                 error != null -> error!!
                 previewing -> "Rough preview - takes aren't synced to each other yet"
+                lastTakeReport != null && !isRecording -> lastTakeReport!!
                 isRecording -> "● Recording take ${selected + 1}   ${formatElapsed(elapsedMs)}"
                 project.hasTake(selected) && takeVersions[selected] >= 0 ->
                     "Take ${selected + 1} of $takeCount - recording again replaces it"
@@ -190,6 +199,7 @@ fun GridRecordScreen(
                         .clickable(enabled = !isRecording && !previewing && !isSelected) {
                             selected = index
                             error = null
+                            lastTakeReport = null
                         },
                 ) {
                     when {
@@ -265,26 +275,55 @@ fun GridRecordScreen(
         RecordButton(
             isRecording = isRecording,
             enabled = !previewing,
-            onClick = {
+            onClick = onClick@{
                 if (isRecording) {
+                    // Stop the engine side first so its audio ends with the button press.
+                    engineInfo = AudioEngine.stopRecording()
                     recorder.stop()
                 } else {
                     error = null
-                    isRecording = true
-                    // Start the take on beat 1. (Not sample-accurate yet: the camera's own audio
-                    // start time isn't tied to the engine clock until audio moves into the engine.)
-                    if (metronomeOn) AudioEngine.restartBeat()
+                    lastTakeReport = null
+                    engineInfo = null
                     val cell = selected
+                    val wavTemp = File(project.dir, "take_${cell + 1}.recording.wav")
+
+                    // The engine provides the shared clock, so it runs while recording even with
+                    // the click off (it then just plays silence).
+                    if (!AudioEngine.isRunning && !AudioEngine.start()) {
+                        error = "Couldn't start the audio engine"
+                        return@onClick
+                    }
+                    // Starts the mic capture and restarts the beat in the same audio callback.
+                    if (!AudioEngine.startRecording(wavTemp)) {
+                        error = "Couldn't open the mic in the audio engine"
+                        if (!metronomeOn) AudioEngine.stop()
+                        return@onClick
+                    }
+
+                    isRecording = true
                     recorder.start(project.takeFile(cell)) { result ->
                         isRecording = false
+                        // Normally already stopped by the button; this covers camera-side failures.
+                        val info = engineInfo ?: AudioEngine.stopRecording()
+                        if (!metronomeOn) AudioEngine.stop()
+
                         result
                             .onSuccess {
+                                project.takeAudioFile(cell).delete()
+                                wavTemp.renameTo(project.takeAudioFile(cell))
+                                TakeInfo.from(info, bpm, beatsPerBar, metronomeOn)
+                                    .writeTo(project.takeInfoFile(cell))
+                                lastTakeReport = describe(cell, info)
+
                                 takeVersions[cell] = takeVersions[cell] + 1
                                 // Move on to the next empty cell, if there is one.
                                 val nextEmpty = (0 until takeCount).firstOrNull { !project.hasTake(it) }
                                 if (nextEmpty != null) selected = nextEmpty
                             }
-                            .onFailure { error = it.message ?: "Recording failed" }
+                            .onFailure {
+                                wavTemp.delete()
+                                error = it.message ?: "Recording failed"
+                            }
                     }
                 }
             },
@@ -315,7 +354,9 @@ private fun StatusLine(text: String, highlight: Boolean) {
         text,
         color = if (highlight) Color.Red else Color.White,
         style = MaterialTheme.typography.titleSmall,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp).height(24.dp),
+        maxLines = 2,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).heightIn(min = 40.dp),
     )
 }
 
@@ -364,6 +405,19 @@ private fun RecordButton(
                 .background(Color.Red)
         )
     }
+}
+
+/** e.g. "Take 2 saved · engine audio 12.4 s · peak -8 dB · est. latency 41 ms" */
+private fun describe(cell: Int, info: EngineRecordingInfo): String {
+    val latency = info.estimatedRoundTripMs?.let { "%.0f ms".format(it) } ?: "unknown"
+    val warning = when {
+        info.framesCaptured == 0L -> " · NO ENGINE AUDIO"
+        info.peak < 0.001f -> " · engine audio silent?"
+        info.overflowFrames > 0 -> " · ${info.overflowFrames} frames dropped"
+        else -> ""
+    }
+    return "Take ${cell + 1} saved · engine audio %.1f s · peak %.0f dB · est. latency %s%s"
+        .format(info.seconds, info.peakDb, latency, warning)
 }
 
 private fun formatElapsed(ms: Long): String {

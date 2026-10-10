@@ -4,13 +4,35 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <string>
+#include <thread>
 #include <vector>
+
+#include "SpscRing.h"
+#include "WavWriter.h"
+
+/** What a finished engine recording looked like. */
+struct RecordingInfo {
+    int64_t framesCaptured = 0;
+    int32_t sampleRate = 0;
+    double outputLatencyMs = -1;   // Oboe's estimate, -1 if unknown
+    double inputLatencyMs = -1;    // Oboe's estimate, -1 if unknown
+    float peak = 0.0f;             // 0..1
+    int64_t overflowFrames = 0;    // frames dropped because the writer fell behind (should be 0)
+};
 
 /**
  * Low-latency audio engine.
  *
- * The output stream's frame counter is the app's master clock: everything (metronome clicks now,
- * backing takes and recorded audio later) is positioned in frames on this one timeline.
+ * The output stream's frame counter is the app's master clock. Recording reads the mic inside
+ * the output callback (full duplex), so every recorded sample has a fixed relationship to the
+ * output timeline:
+ *
+ *   recorded sample k  <->  timeline frame (k - roundTripLatencyFrames)
+ *
+ * where timeline frame 0 is beat 1 of the take (recording and the beat restart happen in the
+ * same callback). The round-trip latency is estimated from Oboe for now; the calibration step
+ * will measure it properly using this exact code path.
  */
 class AudioEngine : public oboe::AudioStreamDataCallback,
                     public oboe::AudioStreamErrorCallback {
@@ -26,10 +48,15 @@ public:
     /** Starts the beat grid again from beat 1 at the next audio callback. */
     void restartBeat() { mRestartRequested.store(true); }
 
+    /** Opens the mic and starts writing a WAV at the next callback (with a beat restart). */
+    bool startRecording(const std::string &wavPath);
+    RecordingInfo stopRecording();
+
     int64_t framesRendered() const { return mFramesRendered.load(); }
     int64_t beatsStarted() const { return mBeatsStarted.load(); }
     int32_t sampleRate() const { return mSampleRate.load(); }
     bool isRunning() const { return mRunning.load(); }
+    bool isRecording() const { return mRecording.load() || mRecordRequested.load(); }
 
     // Oboe callbacks
     oboe::DataCallbackResult onAudioReady(oboe::AudioStream *stream, void *audioData,
@@ -38,10 +65,15 @@ public:
 
 private:
     bool openStream();
+    bool openInputStream();
+    void closeInputStream();
     void buildClicks(int32_t sampleRate);
+    void captureInput();
+    void writerLoop();
 
-    std::mutex mLock;  // guards stream open/close (not used on the audio thread)
+    std::mutex mLock;  // guards stream open/close (never taken on the audio thread)
     std::shared_ptr<oboe::AudioStream> mStream;
+    std::shared_ptr<oboe::AudioStream> mInput;
     int32_t mChannelCount = 2;
 
     std::atomic<bool> mRunning{false};
@@ -64,4 +96,16 @@ private:
 
     std::vector<float> mClickNormal;
     std::vector<float> mClickAccentSamples;
+
+    // Recording
+    std::atomic<bool> mRecordRequested{false};
+    std::atomic<bool> mRecording{false};
+    std::atomic<int64_t> mFramesCaptured{0};
+    std::atomic<int64_t> mOverflowFrames{0};
+    std::atomic<float> mPeak{0.0f};
+    std::vector<float> mScratch;      // allocated before recording; used on the audio thread
+    SpscRing mRing{1 << 19};          // ~10 s at 48 kHz of slack for the writer thread
+    WavWriter mWav;
+    std::thread mWriterThread;
+    std::atomic<bool> mWriterStop{false};
 };

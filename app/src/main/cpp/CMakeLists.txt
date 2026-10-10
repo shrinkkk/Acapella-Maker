@@ -9,6 +9,7 @@ find_package(oboe REQUIRED CONFIG)
 
 add_library(acapella SHARED
         AudioEngine.cpp
+        WavWriter.cpp
         JniBridge.cpp)
 
 target_link_libraries(acapella oboe::oboe log)

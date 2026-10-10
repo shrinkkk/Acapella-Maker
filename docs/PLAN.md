@@ -51,8 +51,8 @@ Open questions (to decide later):
 2. Permissions + camera preview (CameraX) - done
 3. Record a single video take and play it back - done
 4. Project setup (take count + layout) + grid record screen - done
-5. Oboe audio engine: metronome (on/off, BPM, tap tempo, beats per bar, beat dots) on the shared clock
-6. Record audio through Oboe in sync with the metronome
+5. Oboe audio engine + metronome (slider, tap tempo, time signatures) - done
+6. Record audio through Oboe in sync with the metronome (take_N.wav + take_N.json alongside the video)
 7. Recorded cells play back in sync while recording a new take (backing track), with per-cell mute
 8. Latency calibration screen + offset compensation
 9. Per-take controls (volume, nudge, re-record)

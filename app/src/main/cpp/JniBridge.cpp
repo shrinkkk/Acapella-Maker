@@ -1,5 +1,6 @@
 #include <jni.h>
 #include <memory>
+#include <string>
 #include "AudioEngine.h"
 
 namespace {
@@ -53,6 +54,29 @@ JNIEXPORT jlong JNICALL JNI_FN(nativeFramesRendered)(JNIEnv *, jobject) {
 
 JNIEXPORT jint JNICALL JNI_FN(nativeSampleRate)(JNIEnv *, jobject) {
     return engine().sampleRate();
+}
+
+JNIEXPORT jboolean JNICALL JNI_FN(nativeStartRecording)(JNIEnv *env, jobject, jstring path) {
+    const char *chars = env->GetStringUTFChars(path, nullptr);
+    std::string wavPath(chars);
+    env->ReleaseStringUTFChars(path, chars);
+    return engine().startRecording(wavPath) ? JNI_TRUE : JNI_FALSE;
+}
+
+/** [framesCaptured, sampleRate, outputLatencyMs, inputLatencyMs, peak, overflowFrames] */
+JNIEXPORT jdoubleArray JNICALL JNI_FN(nativeStopRecording)(JNIEnv *env, jobject) {
+    RecordingInfo info = engine().stopRecording();
+    jdouble values[6] = {
+            static_cast<jdouble>(info.framesCaptured),
+            static_cast<jdouble>(info.sampleRate),
+            info.outputLatencyMs,
+            info.inputLatencyMs,
+            static_cast<jdouble>(info.peak),
+            static_cast<jdouble>(info.overflowFrames),
+    };
+    jdoubleArray result = env->NewDoubleArray(6);
+    env->SetDoubleArrayRegion(result, 0, 6, values);
+    return result;
 }
 
 JNIEXPORT jboolean JNICALL JNI_FN(nativeIsRunning)(JNIEnv *, jobject) {
