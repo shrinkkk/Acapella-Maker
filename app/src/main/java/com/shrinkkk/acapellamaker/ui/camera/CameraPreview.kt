@@ -3,6 +3,7 @@ package com.shrinkkk.acapellamaker.ui.camera
 import android.util.Log
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
+import androidx.camera.core.UseCase
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,18 +18,22 @@ import androidx.lifecycle.LifecycleOwner
 
 private const val TAG = "CameraPreview"
 
-/** Full-screen live preview from the front camera. */
+/**
+ * Full-screen live preview from the front camera.
+ * [extraUseCase] (e.g. video capture) is bound to the same camera session.
+ */
 @Composable
 fun CameraPreview(
     lifecycleOwner: LifecycleOwner,
     modifier: Modifier = Modifier,
+    extraUseCase: UseCase? = null,
 ) {
     val context = LocalContext.current
     val previewView = remember {
         PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER }
     }
 
-    DisposableEffect(lifecycleOwner) {
+    DisposableEffect(lifecycleOwner, extraUseCase) {
         val providerFuture = ProcessCameraProvider.getInstance(context)
         var provider: ProcessCameraProvider? = null
 
@@ -38,14 +43,15 @@ fun CameraPreview(
                 provider = cameraProvider
                 val preview = Preview.Builder().build()
                 preview.setSurfaceProvider(previewView.surfaceProvider)
+                val useCases = listOfNotNull(preview, extraUseCase).toTypedArray()
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(
                     lifecycleOwner,
                     CameraSelector.DEFAULT_FRONT_CAMERA,
-                    preview,
+                    *useCases,
                 )
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to start camera preview", e)
+                Log.e(TAG, "Failed to start camera", e)
             }
         }, ContextCompat.getMainExecutor(context))
 
