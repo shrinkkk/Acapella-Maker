@@ -194,8 +194,8 @@ fun GridRecordScreen(
     }
 
     // Keep the engine's per-take volumes in step with the mute buttons and volume sliders.
-    LaunchedEffect(project) {
-        snapshotFlow { (0 until takeCount).map { project.gainFor(it) } }
+    LaunchedEffect(project, previewing) {
+        snapshotFlow { (0 until takeCount).map { project.gainFor(it, preview = previewing) } }
             .collect { gains -> gains.forEachIndexed { i, g -> AudioEngine.setTakeGain(i, g) } }
     }
 
@@ -325,8 +325,10 @@ fun GridRecordScreen(
                                     volumeDialogFor = index
                                 }
                             }
-                            CellPill(text = if (project.muted[index]) "🔇" else "🔊") {
-                                project.muted[index] = !project.muted[index]
+                            // Preview and recording each have their own mute setting.
+                            val muteList = if (previewing) project.previewMuted else project.muted
+                            CellPill(text = if (muteList[index]) "🔇" else "🔊") {
+                                muteList[index] = !muteList[index]
                             }
                         }
                     }
@@ -416,7 +418,9 @@ fun GridRecordScreen(
                             }
                             // Other takes become backing tracks (muted ones at volume 0, so their
                             // videos still play along). They start in the same callback as the recording.
-                            val placed = PreviewLoader.load(project, fallbackRoundTripMs = calibratedMs, exclude = cell)
+                            val placed = PreviewLoader.load(
+                                project, fallbackRoundTripMs = calibratedMs, exclude = cell, preview = false,
+                            )
                             videoSync.placement = placed.associateBy { it.index }
 
                             // Starts mic capture, beat 1 and backing playback in the same audio callback.
@@ -494,7 +498,7 @@ fun GridRecordScreen(
                         onValueChange = { project.volume[index] = it },
                         valueRange = 0f..1f,
                     )
-                    if (project.muted[index]) {
+                    if (project.previewMuted[index]) {
                         Text("This take is muted - unmute it to hear the change.", style = MaterialTheme.typography.bodySmall)
                     }
                 }

@@ -11,13 +11,20 @@ class Project(val layout: GridLayout, val dir: File) {
     var beatsPerBar: Int = 4
     var selectedCell: Int = 0
 
-    /** Per-take mute (true by default): muted takes aren't heard while recording or in preview. */
+    /** Per-take mute while RECORDING (muted by default): unmuted takes play as backing. */
     val muted = mutableStateListOf<Boolean>().apply { repeat(layout.takeCount) { add(true) } }
+
+    /** Per-take mute in PREVIEW (unmuted by default). */
+    val previewMuted = mutableStateListOf<Boolean>().apply { repeat(layout.takeCount) { add(false) } }
 
     /** Per-take volume 0..1, set in preview. Applied when the take isn't muted. */
     val volume = mutableStateListOf<Float>().apply { repeat(layout.takeCount) { add(1f) } }
 
-    fun gainFor(index: Int): Float = if (muted[index]) 0f else volume[index]
+    /** Volume for a take on the record screen (backing) or in preview. */
+    fun gainFor(index: Int, preview: Boolean): Float {
+        val isMuted = if (preview) previewMuted[index] else muted[index]
+        return if (isMuted) 0f else volume[index]
+    }
 
     /** Video (with the camera's own audio track). */
     fun takeFile(index: Int): File = File(dir, "take_${index + 1}.mp4")

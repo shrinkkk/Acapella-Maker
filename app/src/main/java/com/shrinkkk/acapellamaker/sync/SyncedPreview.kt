@@ -33,6 +33,7 @@ object PreviewLoader {
         project: Project,
         fallbackRoundTripMs: Double?,
         exclude: Int? = null,
+        preview: Boolean = true,
     ): List<PlacedTake> =
         withContext(Dispatchers.Default) {
             AudioEngine.clearTracks()
@@ -52,7 +53,7 @@ object PreviewLoader {
 
                 // Recorded sample k belongs at timeline frame k - roundTrip.
                 val roundTripFrames = (roundTripMs * sampleRate / 1000.0).roundToLong()
-                AudioEngine.setTakeGain(i, project.gainFor(i))
+                AudioEngine.setTakeGain(i, project.gainFor(i, preview))
                 AudioEngine.addTrack(audio, startFrame = -roundTripFrames, slot = i)
 
                 val videoZeroInWav = if (reliable) alignment!!.videoZeroInWavMs else 0.0
