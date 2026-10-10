@@ -32,6 +32,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -44,12 +45,16 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
+import com.shrinkkk.acapellamaker.audio.AudioEngine
 import com.shrinkkk.acapellamaker.camera.TakeRecorder
 import com.shrinkkk.acapellamaker.model.GridLayouts
 import com.shrinkkk.acapellamaker.model.Project
 import com.shrinkkk.acapellamaker.ui.camera.CameraPreview
 import com.shrinkkk.acapellamaker.ui.grid.GridCanvas
+import com.shrinkkk.acapellamaker.ui.metronome.MetronomeBar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -87,7 +92,51 @@ fun GridRecordScreen(
         }
     }
 
-    DisposableEffect(Unit) { onDispose { recorder.stop() } }
+    // --- Metronome ---
+    var metronomeOn by rememberSaveable { mutableStateOf(false) }
+    var bpm by rememberSaveable { mutableIntStateOf(100) }
+    var beatsPerBar by rememberSaveable { mutableIntStateOf(4) }
+    var currentBeat by remember { mutableIntStateOf(-1) }
+
+    LaunchedEffect(bpm) { AudioEngine.setBpm(bpm) }
+    LaunchedEffect(beatsPerBar) { AudioEngine.setBeatsPerBar(beatsPerBar) }
+    LaunchedEffect(metronomeOn) {
+        if (metronomeOn) {
+            AudioEngine.setBpm(bpm)
+            AudioEngine.setBeatsPerBar(beatsPerBar)
+            AudioEngine.setMetronomeEnabled(true)
+            if (!AudioEngine.start()) {
+                error = "Couldn't start audio"
+                metronomeOn = false
+                return@LaunchedEffect
+            }
+            AudioEngine.restartBeat()
+            // Update the beat dots once per screen frame.
+            while (true) {
+                withFrameNanos { }
+                val started = AudioEngine.beatsStarted
+                currentBeat = if (started <= 0) -1 else ((started - 1) % beatsPerBar).toInt()
+            }
+        } else {
+            AudioEngine.setMetronomeEnabled(false)
+            AudioEngine.stop()
+            currentBeat = -1
+        }
+    }
+
+    // Silence the click when the app goes to the background, and when leaving this screen.
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) metronomeOn = false
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            recorder.stop()
+            AudioEngine.setMetronomeEnabled(false)
+            AudioEngine.stop()
+        }
+    }
 
     BackHandler(enabled = !isRecording) {
         if (project.hasAnyTake()) confirmExit = true else onExit()
@@ -168,15 +217,30 @@ fun GridRecordScreen(
             }
         }
 
+        MetronomeBar(
+            enabled = !isRecording,
+            on = metronomeOn,
+            bpm = bpm,
+            beatsPerBar = beatsPerBar,
+            currentBeat = currentBeat,
+            onToggle = { metronomeOn = !metronomeOn },
+            onBpmChange = { bpm = it },
+            onBeatsPerBarChange = { beatsPerBar = it },
+            modifier = Modifier.padding(top = 12.dp),
+        )
+
         RecordButton(
             isRecording = isRecording,
-            modifier = Modifier.padding(vertical = 20.dp),
+            modifier = Modifier.padding(vertical = 16.dp),
             onClick = {
                 if (isRecording) {
                     recorder.stop()
                 } else {
                     error = null
                     isRecording = true
+                    // Start the take on beat 1. (Not sample-accurate yet: the camera's own audio
+                    // start time isn't tied to the engine clock until audio moves into the engine.)
+                    if (metronomeOn) AudioEngine.restartBeat()
                     val cell = selected
                     recorder.start(project.takeFile(cell)) { result ->
                         isRecording = false
