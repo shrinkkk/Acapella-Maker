@@ -205,7 +205,8 @@ fun GridRecordScreen(
                             version = takeVersions[index],
                         )
                     }
-                    Text(
+                    // Cell numbers are on-screen only (hidden in preview); export renders just the videos.
+                    if (!previewing) Text(
                         "${index + 1}",
                         color = Color.White,
                         style = MaterialTheme.typography.labelMedium,

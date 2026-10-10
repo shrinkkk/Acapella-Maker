@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 
@@ -82,7 +83,7 @@ fun MetronomeBar(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Pill(
                 text = if (on) "♪ On" else "♪ Off",
@@ -95,8 +96,12 @@ fun MetronomeBar(
                 "$bpm BPM",
                 color = Color.White,
                 fontWeight = FontWeight.Bold,
+                // Fixed width + centred text: equal gaps to - and +, and no jumping between 99 and 100.
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                softWrap = false,
                 modifier = Modifier
-                    .width(76.dp)
+                    .width(68.dp)
                     .clickable { if (enabled) showBpmSlider = true }
                     .padding(vertical = 8.dp),
                 style = MaterialTheme.typography.titleSmall,
@@ -192,9 +197,9 @@ private fun Pill(text: String, active: Boolean = false, onClick: () -> Unit) {
             .background(if (active) Color(0xFF2E7D32) else Color(0xFF2A2A2A), RoundedCornerShape(17.dp))
             .border(1.dp, Color(0xFF555555), RoundedCornerShape(17.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp),
+            .padding(horizontal = 11.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, color = Color.White, style = MaterialTheme.typography.labelLarge)
+        Text(text, color = Color.White, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
     }
 }
